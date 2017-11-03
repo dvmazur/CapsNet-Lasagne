@@ -4,10 +4,20 @@ import theano
 from lasagne.layers import Layer, InputLayer
 from lasagne.init import GlorotUniform, Constant
 
+class LengthLayer(Layer):
+
+    def __init__(self, incoming, **kwargs):
+        super(LengthLayer, self).__init__(incoming, **kwargs)
+
+    def get_output_for(self, input, **kwargs):
+        return T.sqrt(T.sum(T.sqr(input), -1))
+
+    def get_output_shape_for(self, input_shape):
+        return tuple(self.input_shape[:-1])
 
 def squash(input):
     """
-    Squashing function
+    Basically computes the "length" of the vector outputed by a capsule
     :param input: 5-D tensor with shape [batch_size, 1, num_caps, vec_len, 1]
     :return: 5-D tensor with same shape as input, but squashed in dims 4 and 5
     """
@@ -17,12 +27,17 @@ def squash(input):
 
     return scalar_factor * input
 
+def softmax(c, dim):
+    return T.exp(c) / T.sum(c, axis=dim)
+
 
 class CapsLayer(Layer):
     """
-    Capsule layer
-    :param Layer:
-    :return:
+    Capsule Layer
+
+    :param incoming: Lasagne Layer
+    :param num_capsule: int, number of capsules in one layer
+    :param dim_vector: int, size of the vector outputed by a single capsule
     """
 
     def __init__(self, incoming, num_capsule, dim_vector, num_routing=3, W=GlorotUniform(), b=Constant(0), **kwargs):
@@ -33,7 +48,7 @@ class CapsLayer(Layer):
 
         self.input_num_caps = self.input_shape[1]
         self.input_dim_vector = self.input_shape[2]
-
+        self.shit = 0;
 
         self.W = self.add_param(W,
                                 (self.input_num_caps, self.num_capsule, self.input_dim_vector, self.dim_vector),
@@ -44,36 +59,34 @@ class CapsLayer(Layer):
                                 name="b")
 
 
-    def get_output_shape_for(self, input_shape):
-        return tuple([None, self.num_capsule, self.dim_vector])
-
-
     def get_output_for(self, input, **kwargs):
         # inputs.shape=[None, input_num_capsule, input_dim_vector]
         # Expand dims to [None, input_num_capsule, 1, 1, input_dim_vector]
-        inputs_expand = T.reshape(input, (None, self.input_num_caps, 1, 1, self.input_dim_vector))
+        inputs_expand = T.reshape(input, (-1, self.input_num_caps, 1, 1, self.input_dim_vector))
 
+        # Prepare for matrix multiplication
         inputs_tiled = T.tile(inputs_expand, [1, 1, self.num_capsule, 1, 1])
 
-        inputs_hat = theano.scan(lambda ac, x: T.batched_tensordot(x, self.W, [3, 2]),
+        inputs_hat, updates = theano.scan(lambda x: T.batched_tensordot(x, self.W, [3, 2]),
                                  sequences=inputs_tiled)
 
         # the routing algorithm
         for r in range(self.num_routing):
-            c = T.nnet.softmax(self.b)
+            c = softmax(self.b, -1)
             c_expand = T.reshape(c, [1, self.input_num_caps, self.num_capsule, 1, 1])
+
             outputs = T.sum(c_expand * inputs_hat, 1, keepdims=True)
             outputs = squash(outputs)
 
-            self.bias = self.bias + T.sum(inputs_hat * outputs, [0, -2, -1])
+            self.b = self.b + T.sum(inputs_hat * outputs, [0, -2, -1])
 
         if self.num_routing == 0:
-            c = T.nnet.softmax(self.bias)
+            c = softmax(self.b)
             c_expand = T.reshape(c, [1, self.input_num_caps, self.num_capsule, 1, 1])
             outputs = squash(T.sum(c_expand * inputs_hat, 1, keepdims=True))
 
+        return outputs
 
-if __name__ == "__main__":
-    a = InputLayer((None, 100, 100))
-    b = CapsLayer(a, 12, 80)
 
+    def get_output_shape_for(self, input_shape):
+        return tuple([self.input_shape[0], self.num_capsule, self.dim_vector])
