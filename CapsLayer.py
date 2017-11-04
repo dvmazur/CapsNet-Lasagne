@@ -48,14 +48,13 @@ class CapsLayer(Layer):
 
         self.input_num_caps = self.input_shape[1]
         self.input_dim_vector = self.input_shape[2]
-        self.shit = 0;
 
         self.W = self.add_param(W,
                                 (self.input_num_caps, self.num_capsule, self.input_dim_vector, self.dim_vector),
                                 name="W")
 
         self.b = self.add_param(b,
-                                (self.input_num_caps, self.num_capsule),
+                                (1, self.input_num_caps, self.num_capsule, 1, 1),
                                 name="b")
 
 
