@@ -4,6 +4,7 @@ import theano
 from lasagne.layers import Layer, InputLayer
 from lasagne.init import GlorotUniform, Constant
 
+
 class LengthLayer(Layer):
 
     def __init__(self, incoming, **kwargs):
@@ -55,7 +56,10 @@ class CapsLayer(Layer):
 
         self.b = self.add_param(b,
                                 (1, self.input_num_caps, self.num_capsule, 1, 1),
-                                name="b")
+                                name="b",
+                                trainable=False)
+
+
 
 
     def get_output_for(self, input, **kwargs):
@@ -71,21 +75,14 @@ class CapsLayer(Layer):
 
         # the routing algorithm
         for r in range(self.num_routing):
-            c = softmax(self.b, -1)
-            c_expand = T.reshape(c, [1, self.input_num_caps, self.num_capsule, 1, 1])
+            softmax(self.b, dim=2)
+            outputs = squash(T.sum(c * inputs_hat, 1, keepdims=True))
 
-            outputs = T.sum(c_expand * inputs_hat, 1, keepdims=True)
-            outputs = squash(outputs)
+            if r != self.num_routing - 1:
+                self.bias += T.sum(inputs_hat * outputs, -1, keepdims=True)
 
-            self.b = self.b + T.sum(inputs_hat * outputs, [0, -2, -1])
-
-        if self.num_routing == 0:
-            c = softmax(self.b)
-            c_expand = T.reshape(c, [1, self.input_num_caps, self.num_capsule, 1, 1])
-            outputs = squash(T.sum(c_expand * inputs_hat, 1, keepdims=True))
-
-        return outputs
+        return T.reshape(outputs, [-1, self.num_capsule, self.dim_vector])
 
 
-    def get_output_shape_for(self, input_shape):
+    def get_output_shape_for (self, input_shape):
         return tuple([self.input_shape[0], self.num_capsule, self.dim_vector])
